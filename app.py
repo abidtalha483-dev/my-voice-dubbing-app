@@ -5,87 +5,155 @@ import whisper
 from deep_translator import GoogleTranslator
 import asyncio
 import edge_tts
+import librosa
+import soundfile as sf
+import numpy as np
 
-st.set_page_config(page_title="AI Video Dubber", page_icon="🎬", layout="wide")
+st.set_page_config(page_title="Pro AI Video Dubber", page_icon="🌍", layout="wide")
 
-st.title("🎬 AI Video Dubbing App (English to Hindi/Urdu)")
-st.markdown("Upload an English video, and AI will dub it into Hindi/Urdu automatically!")
+st.title("🌍 Pro AI Video Dubbing & Lip-Sync App")
+st.markdown("Upload a video, choose your language, and AI will dub it with perfect timing!")
 
-# Audio nikalne ka function
+# 🌍 Languages ki List (Translation Code aur Edge-TTS Voice ke sath)
+SUPPORTED_LANGUAGES = {
+    "Hindi": {"trans": "hi", "voice": "hi-IN-MadhurNeural"},
+    "Urdu": {"trans": "ur", "voice": "ur-PK-AsadNeural"},
+    "Spanish": {"trans": "es", "voice": "es-ES-AlvaroNeural"},
+    "French": {"trans": "fr", "voice": "fr-FR-HenriNeural"},
+    "Arabic": {"trans": "ar", "voice": "ar-SA-HamedNeural"},
+    "Mandarin Chinese": {"trans": "zh-CN", "voice": "zh-CN-YunxiNeural"},
+    "Bengali": {"trans": "bn", "voice": "bn-IN-BashkarNeural"},
+    "Russian": {"trans": "ru", "voice": "ru-RU-DmitryNeural"},
+    "Portuguese": {"trans": "pt", "voice": "pt-BR-AntonioNeural"},
+    "Indonesian": {"trans": "id", "voice": "id-ID-ArdiNeural"},
+    "Japanese": {"trans": "ja", "voice": "ja-JP-KeitaNeural"},
+    "German": {"trans": "de", "voice": "de-DE-KillianNeural"},
+    "Turkish": {"trans": "tr", "voice": "tr-TR-AhmetNeural"},
+    "Tamil": {"trans": "ta", "voice": "ta-IN-PallaviNeural"},
+    "Korean": {"trans": "ko", "voice": "ko-KR-InJoonNeural"},
+    "Vietnamese": {"trans": "vi", "voice": "vi-VN-HoaiMyNeural"},
+    "Italian": {"trans": "it", "voice": "it-IT-DiegoNeural"},
+    "Polish": {"trans": "pl", "voice": "pl-PL-MarekNeural"},
+    "Persian (Farsi)": {"trans": "fa", "voice": "fa-IR-FaridNeural"},
+    "Dutch": {"trans": "nl", "voice": "nl-NL-MaartenNeural"},
+    "Telugu": {"trans": "te", "voice": "te-IN-MohanNeural"},
+    "Marathi": {"trans": "mr", "voice": "mr-IN-ManoharNeural"},
+    "Gujarati": {"trans": "gu", "voice": "gu-IN-NiranjanNeural"},
+    "Punjabi": {"trans": "pa", "voice": "pa-IN-OjasNeural"},
+    "Malay": {"trans": "ms", "voice": "ms-MY-OsmanNeural"},
+    "Thai": {"trans": "th", "voice": "th-TH-NiwatNeural"},
+    "Greek": {"trans": "el", "voice": "el-GR-NestorasNeural"},
+    "Ukrainian": {"trans": "uk", "voice": "uk-UA-OstapNeural"},
+    "Swahili": {"trans": "sw", "voice": "sw-KE-ElimuNeural"}
+}
+
+# Helper Functions
 def extract_audio(video_path, audio_path):
-    command =["ffmpeg", "-y", "-i", video_path, "-q:a", "0", "-map", "a", audio_path]
-    subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    subprocess.run(["ffmpeg", "-y", "-i", video_path, "-q:a", "0", "-map", "a", audio_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-# Nayi aawaz aur video jorne ka function
 def merge_audio_video(video_path, audio_path, output_path):
-    command =["ffmpeg", "-y", "-i", video_path, "-i", audio_path, "-c:v", "copy", "-map", "0:v:0", "-map", "1:a:0", output_path]
-    subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    subprocess.run(["ffmpeg", "-y", "-i", video_path, "-i", audio_path, "-c:v", "copy", "-map", "0:v:0", "-map", "1:a:0", output_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-# AI aawaz banane ka function
-async def generate_audio(text, output_path, voice="hi-IN-MadhurNeural"):
+async def generate_audio(text, output_path, voice):
     communicate = edge_tts.Communicate(text, voice)
     await communicate.save(output_path)
 
-# Video upload karne ka option
-uploaded_video = st.file_uploader("Upload English Video (MP4) - Testing ke liye choti video (1-2 min) dalein", type=["mp4"])
+# UI Elements
+selected_lang = st.selectbox("🌐 Konsi zaban (Language) mein dub karna hai?", list(SUPPORTED_LANGUAGES.keys()))
+uploaded_video = st.file_uploader("Upload Video (MP4) - Choti video test karein", type=["mp4"])
 
 if uploaded_video is not None:
-    # Upload ki hui video ko save karna
     temp_video_path = "temp_input.mp4"
     with open(temp_video_path, "wb") as f:
         f.write(uploaded_video.read())
-    
     st.video(temp_video_path)
 
-    if st.button("🎙️ Start AI Dubbing (English to Hindi)"):
-        with st.status("AI Video Process kar raha hai... Thora intezar karein!", expanded=True) as status:
+    if st.button(f"🎙️ Start Dubbing in {selected_lang}"):
+        with st.status(f"Processing Video to {selected_lang}... Please wait!", expanded=True) as status:
             try:
-                # Step 1: Extract Audio
-                st.write("1️⃣ Video se aawaz alag ki ja rahi hai...")
+                # 1. Audio nikalna
+                st.write("1️⃣ Extracting Original Audio...")
                 temp_audio_path = "temp_audio.wav"
                 extract_audio(temp_video_path, temp_audio_path)
 
-                # Step 2: Whisper Transcription
-                st.write("2️⃣ Whisper AI aawaz sun kar English text likh raha hai...")
+                # 2. Whisper se AI Timestamps nikalna
+                st.write("2️⃣ AI is analyzing timestamps (Lip-sync timing)...")
                 model = whisper.load_model("tiny")
                 result = model.transcribe(temp_audio_path)
-                english_text = result["text"]
-                st.info(f"**English Transcript:** {english_text}")
+                segments = result["segments"]
 
-                # Step 3: Translation
-                st.write("3️⃣ English ko Hindi/Urdu mein Translate kiya ja raha hai...")
-                translator = GoogleTranslator(source='auto', target='hi')
-                hindi_text = translator.translate(english_text)
-                st.success(f"**Hindi Translation:** {hindi_text}")
+                # 3. Translation & Voice Generation setup
+                st.write(f"3️⃣ Translating and matching voice timing for {selected_lang}...")
+                target_trans = SUPPORTED_LANGUAGES[selected_lang]["trans"]
+                target_voice = SUPPORTED_LANGUAGES[selected_lang]["voice"]
+                translator = GoogleTranslator(source='auto', target=target_trans)
 
-                # Step 4: Text-to-Speech (Edge TTS)
-                st.write("4️⃣ Nayi Hindi aawaz banai ja rahi hai...")
-                dubbed_audio_path = "dubbed_audio.mp3"
-                asyncio.run(generate_audio(hindi_text, dubbed_audio_path))
+                # Khali Audio Canvas (Jis par hum dubbing rakhenge)
+                sr = 24000
+                final_audio = np.array([])
 
-                # Step 5: Merging back to Video
-                st.write("5️⃣ Nayi aawaz ko video par lagaya ja raha hai...")
+                # 4. Har line ko uske waqt par set karna (The Magic Loop)
+                for seg in segments:
+                    start_time = seg["start"]
+                    end_time = seg["end"]
+                    text = seg["text"].strip()
+                    
+                    if not text: continue
+                    
+                    # Translate
+                    translated_text = translator.translate(text)
+                    
+                    # Nayi Aawaz banana
+                    seg_audio_path = "temp_seg.mp3"
+                    asyncio.run(generate_audio(translated_text, seg_audio_path, voice=target_voice))
+                    
+                    # Aawaz ki lambai (Speed) adjust karna
+                    y_tts, _ = librosa.load(seg_audio_path, sr=sr)
+                    target_dur = max(0.5, end_time - start_time) # Asli video mein banda kitni dair bola
+                    actual_dur = librosa.get_duration(y=y_tts, sr=sr) # AI ne kitni dair mein bola
+                    
+                    if actual_dur > 0:
+                        rate = actual_dur / target_dur
+                        # Speed thori adjust karna taake natural lage
+                        rate = max(0.7, min(rate, 1.5)) 
+                        y_tts_stretched = librosa.effects.time_stretch(y_tts, rate=rate)
+                    else:
+                        y_tts_stretched = y_tts
+                        
+                    # Audio array mein fit karna
+                    start_sample = int(start_time * sr)
+                    end_sample = start_sample + len(y_tts_stretched)
+                    
+                    if len(final_audio) < end_sample:
+                        final_audio = np.pad(final_audio, (0, end_sample - len(final_audio)))
+                        
+                    final_audio[start_sample:start_sample+len(y_tts_stretched)] = y_tts_stretched
+
+                # 5. Final Synchronized Audio save karna
+                st.write("4️⃣ Merging perfectly timed audio with video...")
+                synced_audio_path = "dubbed_audio_sync.wav"
+                sf.write(synced_audio_path, final_audio, sr)
+
+                # Video ke sath jorna
                 final_video_path = "final_dubbed_video.mp4"
-                merge_audio_video(temp_video_path, dubbed_audio_path, final_video_path)
+                merge_audio_video(temp_video_path, synced_audio_path, final_video_path)
 
-                status.update(label="✅ Video Successfully Dubbed!", state="complete", expanded=False)
+                status.update(label="✅ Dubbing Complete with Lip-Sync!", state="complete", expanded=False)
 
-                # Natija (Result) dikhana
-                st.markdown("### 🎬 Aapki Dubbed Video Tayyar hai!")
+                st.markdown(f"### 🎬 Your {selected_lang} Dubbed Video is Ready!")
                 st.video(final_video_path)
 
-                # Download karne ka button
                 with open(final_video_path, "rb") as file:
                     st.download_button(
-                        label="⬇️ Download Dubbed Video",
+                        label="⬇️ Download Synced Video",
                         data=file,
-                        file_name="Dubbed_Movie_Clip.mp4",
+                        file_name=f"Dubbed_{selected_lang}_Video.mp4",
                         mime="video/mp4"
                     )
 
             except Exception as e:
-                st.error(f"Processing mein ek error aagaya: {e}")
+                st.error(f"Error: {e}")
                 status.update(label="❌ Error occurred", state="error")
 
 st.markdown("---")
-st.caption("Note: Yeh free server hai, isliye shuru mein sirf choti videos (1-2 minutes) daal kar test karein.")
+st.caption("AI Lip-Sync Enabled: Aawaz ab original time ke sath match hogi aur katega nahi!")
