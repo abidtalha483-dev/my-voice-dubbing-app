@@ -2,3 +2,6 @@ streamlit
 librosa
 soundfile
 numpy
+openai-whisper
+deep-translator
+edge-tts
