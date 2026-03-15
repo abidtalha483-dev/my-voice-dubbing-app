@@ -1,59 +1,91 @@
 import streamlit as st
-import librosa
-import soundfile as sf
-import numpy as np
-import io
+import os
+import subprocess
+import whisper
+from deep_translator import GoogleTranslator
+import asyncio
+import edge_tts
 
-st.set_page_config(page_title="Voice Changer App", page_icon="🎤")
+st.set_page_config(page_title="AI Video Dubber", page_icon="🎬", layout="wide")
 
-st.title("🎤 AI Voice Changer & Dubbing App")
-st.markdown("Python 3.14+ Compatible | Powered by Librosa")
+st.title("🎬 AI Video Dubbing App (English to Hindi/Urdu)")
+st.markdown("Upload an English video, and AI will dub it into Hindi/Urdu automatically!")
 
-# File uploader
-uploaded_file = st.file_uploader("Apni audio file upload karein (WAV ya MP3)", type=["wav", "mp3"])
+# Audio nikalne ka function
+def extract_audio(video_path, audio_path):
+    command =["ffmpeg", "-y", "-i", video_path, "-q:a", "0", "-map", "a", audio_path]
+    subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-if uploaded_file is not None:
-    st.audio(uploaded_file, format="audio/wav")
+# Nayi aawaz aur video jorne ka function
+def merge_audio_video(video_path, audio_path, output_path):
+    command =["ffmpeg", "-y", "-i", video_path, "-i", audio_path, "-c:v", "copy", "-map", "0:v:0", "-map", "1:a:0", output_path]
+    subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+# AI aawaz banane ka function
+async def generate_audio(text, output_path, voice="hi-IN-MadhurNeural"):
+    communicate = edge_tts.Communicate(text, voice)
+    await communicate.save(output_path)
+
+# Video upload karne ka option
+uploaded_video = st.file_uploader("Upload English Video (MP4) - Testing ke liye choti video (1-2 min) dalein", type=["mp4"])
+
+if uploaded_video is not None:
+    # Upload ki hui video ko save karna
+    temp_video_path = "temp_input.mp4"
+    with open(temp_video_path, "wb") as f:
+        f.write(uploaded_video.read())
     
-    st.markdown("### 🎛️ Audio Settings")
-    
-    # Sliders for Pitch and Speed
-    pitch_steps = st.slider("Pitch (Aawaz ki Shruti)", min_value=-12.0, max_value=12.0, value=0.0, step=0.5, 
-                            help="-ve means aawaz bhari hogi, +ve means patli hogi")
-    speed_rate = st.slider("Speed (Raftaar)", min_value=0.5, max_value=2.0, value=1.0, step=0.1)
+    st.video(temp_video_path)
 
-    if st.button("Apply Changes"):
-        with st.spinner("Processing audio... Please wait!"):
+    if st.button("🎙️ Start AI Dubbing (English to Hindi)"):
+        with st.status("AI Video Process kar raha hai... Thora intezar karein!", expanded=True) as status:
             try:
-                # 1. Audio load karna (Librosa mp3 aur wav dono handle kar lega)
-                # sr=None rakhne se original sample rate maintain rehta hai
-                y, sr = librosa.load(uploaded_file, sr=None)
-                
-                # 2. Pitch change karna
-                if pitch_steps != 0.0:
-                    y = librosa.effects.pitch_shift(y, sr=sr, n_steps=pitch_steps)
-                
-                # 3. Speed change karna
-                if speed_rate != 1.0:
-                    y = librosa.effects.time_stretch(y, rate=speed_rate)
-                
-                # 4. Processed audio ko memory mein save karna (Virtual File)
-                buffer = io.BytesIO()
-                sf.write(buffer, y, sr, format='WAV')
-                buffer.seek(0)
-                
-                st.success("Audio successfully process ho gayi!")
-                
-                # 5. Playback aur Download ka option dena
-                st.audio(buffer, format="audio/wav")
-                st.download_button(
-                    label="⬇️ Download Processed Audio",
-                    data=buffer,
-                    file_name="voice_changed_audio.wav",
-                    mime="audio/wav"
-                )
+                # Step 1: Extract Audio
+                st.write("1️⃣ Video se aawaz alag ki ja rahi hai...")
+                temp_audio_path = "temp_audio.wav"
+                extract_audio(temp_video_path, temp_audio_path)
+
+                # Step 2: Whisper Transcription
+                st.write("2️⃣ Whisper AI aawaz sun kar English text likh raha hai...")
+                model = whisper.load_model("tiny")
+                result = model.transcribe(temp_audio_path)
+                english_text = result["text"]
+                st.info(f"**English Transcript:** {english_text}")
+
+                # Step 3: Translation
+                st.write("3️⃣ English ko Hindi/Urdu mein Translate kiya ja raha hai...")
+                translator = GoogleTranslator(source='auto', target='hi')
+                hindi_text = translator.translate(english_text)
+                st.success(f"**Hindi Translation:** {hindi_text}")
+
+                # Step 4: Text-to-Speech (Edge TTS)
+                st.write("4️⃣ Nayi Hindi aawaz banai ja rahi hai...")
+                dubbed_audio_path = "dubbed_audio.mp3"
+                asyncio.run(generate_audio(hindi_text, dubbed_audio_path))
+
+                # Step 5: Merging back to Video
+                st.write("5️⃣ Nayi aawaz ko video par lagaya ja raha hai...")
+                final_video_path = "final_dubbed_video.mp4"
+                merge_audio_video(temp_video_path, dubbed_audio_path, final_video_path)
+
+                status.update(label="✅ Video Successfully Dubbed!", state="complete", expanded=False)
+
+                # Natija (Result) dikhana
+                st.markdown("### 🎬 Aapki Dubbed Video Tayyar hai!")
+                st.video(final_video_path)
+
+                # Download karne ka button
+                with open(final_video_path, "rb") as file:
+                    st.download_button(
+                        label="⬇️ Download Dubbed Video",
+                        data=file,
+                        file_name="Dubbed_Movie_Clip.mp4",
+                        mime="video/mp4"
+                    )
+
             except Exception as e:
-                st.error(f"Ek error aagaya: {e}")
+                st.error(f"Processing mein ek error aagaya: {e}")
+                status.update(label="❌ Error occurred", state="error")
 
 st.markdown("---")
-st.caption("🚀 Future Scaling: Yeh architecture RVC aur Whisper (AI Dubbing) ke liye completely ready hai!")
+st.caption("Note: Yeh free server hai, isliye shuru mein sirf choti videos (1-2 minutes) daal kar test karein.")
