@@ -1,4 +1,4 @@
 streamlit
-pydub
+librosa
+soundfile
 numpy
-scipy
