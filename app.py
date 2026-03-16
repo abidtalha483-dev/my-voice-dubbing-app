@@ -1,159 +1,185 @@
 import streamlit as st
-import os
-import subprocess
 import whisper
-from deep_translator import GoogleTranslator
+import subprocess
+import os
+import librosa
+import numpy as np
+import soundfile as sf
 import asyncio
 import edge_tts
-import librosa
-import soundfile as sf
-import numpy as np
+from deep_translator import GoogleTranslator
+import tempfile
 
-st.set_page_config(page_title="Pro AI Video Dubber", page_icon="🌍", layout="wide")
+st.set_page_config(page_title="AI Video Dubber Pro", page_icon="🎬", layout="wide")
 
-st.title("🌍 Pro AI Video Dubbing & Lip-Sync App")
-st.markdown("Upload a video, choose your language, and AI will dub it with perfect timing!")
+st.title("🎬 AI Video Dubbing App (Pro Version)")
+st.markdown("Upload a video, choose your language, and AI will dub it with Lip-Sync matching!")
 
-# 🌍 Languages ki List (Translation Code aur Edge-TTS Voice ke sath)
-SUPPORTED_LANGUAGES = {
-    "Hindi": {"trans": "hi", "voice": "hi-IN-MadhurNeural"},
-    "Urdu": {"trans": "ur", "voice": "ur-PK-AsadNeural"},
-    "Spanish": {"trans": "es", "voice": "es-ES-AlvaroNeural"},
-    "French": {"trans": "fr", "voice": "fr-FR-HenriNeural"},
-    "Arabic": {"trans": "ar", "voice": "ar-SA-HamedNeural"},
-    "Mandarin Chinese": {"trans": "zh-CN", "voice": "zh-CN-YunxiNeural"},
-    "Bengali": {"trans": "bn", "voice": "bn-IN-BashkarNeural"},
-    "Russian": {"trans": "ru", "voice": "ru-RU-DmitryNeural"},
-    "Portuguese": {"trans": "pt", "voice": "pt-BR-AntonioNeural"},
-    "Indonesian": {"trans": "id", "voice": "id-ID-ArdiNeural"},
-    "Japanese": {"trans": "ja", "voice": "ja-JP-KeitaNeural"},
-    "German": {"trans": "de", "voice": "de-DE-KillianNeural"},
-    "Turkish": {"trans": "tr", "voice": "tr-TR-AhmetNeural"},
-    "Tamil": {"trans": "ta", "voice": "ta-IN-PallaviNeural"},
-    "Korean": {"trans": "ko", "voice": "ko-KR-InJoonNeural"},
-    "Vietnamese": {"trans": "vi", "voice": "vi-VN-HoaiMyNeural"},
-    "Italian": {"trans": "it", "voice": "it-IT-DiegoNeural"},
-    "Polish": {"trans": "pl", "voice": "pl-PL-MarekNeural"},
-    "Persian (Farsi)": {"trans": "fa", "voice": "fa-IR-FaridNeural"},
-    "Dutch": {"trans": "nl", "voice": "nl-NL-MaartenNeural"},
-    "Telugu": {"trans": "te", "voice": "te-IN-MohanNeural"},
-    "Marathi": {"trans": "mr", "voice": "mr-IN-ManoharNeural"},
-    "Gujarati": {"trans": "gu", "voice": "gu-IN-NiranjanNeural"},
-    "Punjabi": {"trans": "pa", "voice": "pa-IN-OjasNeural"},
-    "Malay": {"trans": "ms", "voice": "ms-MY-OsmanNeural"},
-    "Thai": {"trans": "th", "voice": "th-TH-NiwatNeural"},
-    "Greek": {"trans": "el", "voice": "el-GR-NestorasNeural"},
-    "Ukrainian": {"trans": "uk", "voice": "uk-UA-OstapNeural"},
-    "Swahili": {"trans": "sw", "voice": "sw-KE-ElimuNeural"}
+uploaded_file = st.file_uploader("Upload MP4 Video (Testing ke liye 1-2 min ki video dalein)", type=["mp4"])
+
+LANGUAGES = {
+"Mandarin Chinese": ("zh-CN","zh-CN-XiaoxiaoNeural"),
+"Hindi": ("hi","hi-IN-SwaraNeural"),
+"Spanish": ("es","es-ES-ElviraNeural"),
+"French": ("fr","fr-FR-DeniseNeural"),
+"Arabic": ("ar","ar-SA-ZariyahNeural"),
+"Bengali": ("bn","bn-BD-NabanitaNeural"),
+"Russian": ("ru","ru-RU-SvetlanaNeural"),
+"Portuguese": ("pt","pt-BR-FranciscaNeural"),
+"Urdu": ("ur","ur-PK-UzmaNeural"),
+"Indonesian": ("id","id-ID-GadisNeural"),
+"Japanese": ("ja","ja-JP-NanamiNeural"),
+"German": ("de","de-DE-KatjaNeural"),
+"Swahili": ("sw","sw-KE-ZuriNeural"),
+"Turkish": ("tr","tr-TR-EmelNeural"),
+"Tamil": ("ta","ta-IN-PallaviNeural"),
+"Marathi": ("mr","mr-IN-AarohiNeural"),
+"Telugu": ("te","te-IN-ShrutiNeural"),
+"Korean": ("ko","ko-KR-SunHiNeural"),
+"Vietnamese": ("vi","vi-VN-HoaiMyNeural"),
+"Italian": ("it","it-IT-ElsaNeural"),
+"Punjabi": ("pa","pa-IN-GaganNeural"),
+"Persian (Farsi)": ("fa","fa-IR-DilaraNeural"),
+"Gujarati": ("gu","gu-IN-DhwaniNeural"),
+"Malay": ("ms","ms-MY-YasminNeural"),
+"Thai": ("th","th-TH-PremwadeeNeural"),
+"Kannada": ("kn","kn-IN-SapnaNeural"),
+"Malayalam": ("ml","ml-IN-SobhanaNeural"),
+"Dutch": ("nl","nl-NL-ColetteNeural"),
+"Greek": ("el","el-GR-AthinaNeural"),
+"Ukrainian": ("uk","uk-UA-PolinaNeural"),
+"Polish": ("pl","pl-PL-ZofiaNeural"),
+"Romanian": ("ro","ro-RO-AlinaNeural"),
+"Czech": ("cs","cs-CZ-VlastaNeural"),
+"Hungarian": ("hu","hu-HU-NoemiNeural"),
+"Hebrew": ("he","he-IL-HilaNeural"),
+"Bulgarian": ("bg","bg-BG-KalinaNeural"),
+"Slovak": ("sk","sk-SK-ViktoriaNeural"),
+"Finnish": ("fi","fi-FI-NooraNeural"),
+"Danish": ("da","da-DK-ChristelNeural"),
+"Norwegian": ("no","nb-NO-PernilleNeural"),
+"Swedish": ("sv","sv-SE-SofieNeural"),
+"Lithuanian": ("lt","lt-LT-OnaNeural"),
+"Latvian": ("lv","lv-LV-EveritaNeural"),
+"Estonian": ("et","et-EE-AnuNeural"),
+"Tagalog (Filipino)": ("tl","fil-PH-BlessicaNeural"),
+"Nepali": ("ne","ne-NP-HemkalaNeural"),
+"Pashto": ("ps","ps-AF-LatifaNeural"),
+"Amharic": ("am","am-ET-MekdesNeural"),
+"Zulu": ("zu","zu-ZA-ThandoNeural"),
+"Xhosa": ("xh","xh-ZA-ThandoNeural"),
+"Yoruba": ("yo","yo-NG-AdetounNeural"),
+"Igbo": ("ig","ig-NG-EzinneNeural")
 }
 
-# Helper Functions
-def extract_audio(video_path, audio_path):
-    subprocess.run(["ffmpeg", "-y", "-i", video_path, "-q:a", "0", "-map", "a", audio_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+target_language = st.selectbox("🌍 Select Target Language (Kis zaban mein dub karna hai?)", list(LANGUAGES.keys()))
 
-def merge_audio_video(video_path, audio_path, output_path):
-    subprocess.run(["ffmpeg", "-y", "-i", video_path, "-i", audio_path, "-c:v", "copy", "-map", "0:v:0", "-map", "1:a:0", output_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-async def generate_audio(text, output_path, voice):
+async def generate_tts(text, voice, path):
     communicate = edge_tts.Communicate(text, voice)
-    await communicate.save(output_path)
+    await communicate.save(path)
 
-# UI Elements
-selected_lang = st.selectbox("🌐 Konsi zaban (Language) mein dub karna hai?", list(SUPPORTED_LANGUAGES.keys()))
-uploaded_video = st.file_uploader("Upload Video (MP4) - Choti video test karein", type=["mp4"])
+def extract_audio(video, audio):
+    cmd =["ffmpeg", "-y", "-i", video, "-ac", "1", "-ar", "16000", audio]
+    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-if uploaded_video is not None:
-    temp_video_path = "temp_input.mp4"
-    with open(temp_video_path, "wb") as f:
-        f.write(uploaded_video.read())
-    st.video(temp_video_path)
+def merge_audio(video, audio, output):
+    cmd =["ffmpeg", "-y", "-i", video, "-i", audio, "-c:v", "copy", "-map", "0:v:0", "-map", "1:a:0", output]
+    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    if st.button(f"🎙️ Start Dubbing in {selected_lang}"):
-        with st.status(f"Processing Video to {selected_lang}... Please wait!", expanded=True) as status:
+if uploaded_file:
+    # Display the uploaded video
+    st.video(uploaded_file)
+
+    if st.button("🎙️ Start Dubbing (With Lip-Sync)"):
+        with st.status("🚀 Processing Video... (Isme thora time lag sakta hai)", expanded=True) as status:
             try:
-                # 1. Audio nikalna
-                st.write("1️⃣ Extracting Original Audio...")
-                temp_audio_path = "temp_audio.wav"
-                extract_audio(temp_video_path, temp_audio_path)
+                with tempfile.TemporaryDirectory() as tmp:
+                    video_path = os.path.join(tmp, "video.mp4")
+                    audio_path = os.path.join(tmp, "audio.wav")
 
-                # 2. Whisper se AI Timestamps nikalna
-                st.write("2️⃣ AI is analyzing timestamps (Lip-sync timing)...")
-                model = whisper.load_model("tiny")
-                result = model.transcribe(temp_audio_path)
-                segments = result["segments"]
+                    # Save uploaded file
+                    with open(video_path, "wb") as f:
+                        f.write(uploaded_file.read())
 
-                # 3. Translation & Voice Generation setup
-                st.write(f"3️⃣ Translating and matching voice timing for {selected_lang}...")
-                target_trans = SUPPORTED_LANGUAGES[selected_lang]["trans"]
-                target_voice = SUPPORTED_LANGUAGES[selected_lang]["voice"]
-                translator = GoogleTranslator(source='auto', target=target_trans)
+                    st.write("1️⃣ Extracting audio from video...")
+                    extract_audio(video_path, audio_path)
 
-                # Khali Audio Canvas (Jis par hum dubbing rakhenge)
-                sr = 24000
-                final_audio = np.array([])
+                    st.write("2️⃣ Loading Whisper AI (Understanding Speech)...")
+                    model = whisper.load_model("tiny")
 
-                # 4. Har line ko uske waqt par set karna (The Magic Loop)
-                for seg in segments:
-                    start_time = seg["start"]
-                    end_time = seg["end"]
-                    text = seg["text"].strip()
+                    st.write("3️⃣ Transcribing and finding lip-sync timings...")
+                    result = model.transcribe(audio_path)
+                    segments = result["segments"]
+
+                    translator_code, voice = LANGUAGES[target_language]
+
+                    # Load original audio to get its length
+                    y_original, sr = librosa.load(audio_path, sr=16000)
                     
-                    if not text: continue
+                    # Create a blank canvas of the same length to paste new audio on it
+                    canvas = np.zeros(len(y_original))
+
+                    st.write(f"4️⃣ Translating & Generating {target_language} Voice...")
                     
-                    # Translate
-                    translated_text = translator.translate(text)
-                    
-                    # Nayi Aawaz banana
-                    seg_audio_path = "temp_seg.mp3"
-                    asyncio.run(generate_audio(translated_text, seg_audio_path, voice=target_voice))
-                    
-                    # Aawaz ki lambai (Speed) adjust karna
-                    y_tts, _ = librosa.load(seg_audio_path, sr=sr)
-                    target_dur = max(0.5, end_time - start_time) # Asli video mein banda kitni dair bola
-                    actual_dur = librosa.get_duration(y=y_tts, sr=sr) # AI ne kitni dair mein bola
-                    
-                    if actual_dur > 0:
-                        rate = actual_dur / target_dur
-                        # Speed thori adjust karna taake natural lage
-                        rate = max(0.7, min(rate, 1.5)) 
-                        y_tts_stretched = librosa.effects.time_stretch(y_tts, rate=rate)
-                    else:
-                        y_tts_stretched = y_tts
+                    # Process segment by segment for Lip Sync
+                    for i, seg in enumerate(segments):
+                        start = seg["start"]
+                        end = seg["end"]
+                        text = seg["text"]
+
+                        # Translate
+                        translated = GoogleTranslator(source='auto', target=translator_code).translate(text)
+
+                        # Generate Audio
+                        tts_path = os.path.join(tmp, f"tts_{i}.mp3")
+                        asyncio.run(generate_tts(translated, voice, tts_path))
+
+                        # Load Generated Audio
+                        y_tts, _ = librosa.load(tts_path, sr=16000)
+
+                        # Calculate Timings
+                        start_sample = int(start * sr)
+                        end_sample = int(end * sr)
                         
-                    # Audio array mein fit karna
-                    start_sample = int(start_time * sr)
-                    end_sample = start_sample + len(y_tts_stretched)
-                    
-                    if len(final_audio) < end_sample:
-                        final_audio = np.pad(final_audio, (0, end_sample - len(final_audio)))
+                        # Prevent Array Out of Bound error
+                        if start_sample >= len(canvas):
+                            continue
+                        if end_sample > len(canvas):
+                            end_sample = len(canvas)
+
+                        target_len = end_sample - start_sample
                         
-                    final_audio[start_sample:start_sample+len(y_tts_stretched)] = y_tts_stretched
+                        if target_len > 0:
+                            # Adjust Speed (Time Stretch) to match lip sync
+                            rate = len(y_tts) / target_len
+                            y_match = librosa.effects.time_stretch(y_tts, rate=rate)
 
-                # 5. Final Synchronized Audio save karna
-                st.write("4️⃣ Merging perfectly timed audio with video...")
-                synced_audio_path = "dubbed_audio_sync.wav"
-                sf.write(synced_audio_path, final_audio, sr)
+                            # Fit perfectly into the required length
+                            if len(y_match) > target_len:
+                                y_match = y_match[:target_len]
+                            else:
+                                pad = target_len - len(y_match)
+                                y_match = np.pad(y_match, (0, pad))
 
-                # Video ke sath jorna
-                final_video_path = "final_dubbed_video.mp4"
-                merge_audio_video(temp_video_path, synced_audio_path, final_video_path)
+                            # Put the audio on the canvas at the exact time
+                            canvas[start_sample:end_sample] += y_match
 
-                status.update(label="✅ Dubbing Complete with Lip-Sync!", state="complete", expanded=False)
+                    st.write("5️⃣ Merging new audio back to video...")
+                    final_audio = os.path.join(tmp, "dubbed.wav")
+                    sf.write(final_audio, canvas, sr)
 
-                st.markdown(f"### 🎬 Your {selected_lang} Dubbed Video is Ready!")
-                st.video(final_video_path)
+                    final_video = "final_output.mp4"
+                    merge_audio(video_path, final_audio, final_video)
 
-                with open(final_video_path, "rb") as file:
-                    st.download_button(
-                        label="⬇️ Download Synced Video",
-                        data=file,
-                        file_name=f"Dubbed_{selected_lang}_Video.mp4",
-                        mime="video/mp4"
-                    )
+                    status.update(label="✅ Video Successfully Dubbed!", state="complete", expanded=False)
+
+                    # Show Final Video
+                    st.success("🎉 Aapki Video Tayyar Hai!")
+                    st.video(final_video)
+
+                    with open(final_video, "rb") as f:
+                        st.download_button("⬇️ Download Dubbed Video", f, file_name="dubbed_video_lipsync.mp4", mime="video/mp4")
 
             except Exception as e:
-                st.error(f"Error: {e}")
-                status.update(label="❌ Error occurred", state="error")
-
-st.markdown("---")
-st.caption("AI Lip-Sync Enabled: Aawaz ab original time ke sath match hogi aur katega nahi!")
+                st.error(f"❌ Ek error aagaya: {e}")
+                status.update(label="Error occurred", state="error")
